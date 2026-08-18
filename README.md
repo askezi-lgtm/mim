@@ -1,5 +1,7 @@
 # 😂 Make It Mem
 
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/askezi-lgtm/mim)
+
 משחק מסיבות מרובה־משתתפים בהשראת [Make It Meme](https://makeitmeme.com):
 כל סיבוב כל שחקן מקבל תמונת מם, כותב עליה כיתוב, ואז כולם מדרגים את הממים
 של השאר. הכי מצחיק — מנצח.
@@ -55,6 +57,31 @@ npm start          # http://localhost:3000
 { id: 'my-meme', name: 'My meme', url: '/templates/my-meme.jpg' }
 ```
 
+## פריסה ל־Render / Deploy
+
+הריפו כולל [`render.yaml`](render.yaml), אז אפשר לפרוס בלחיצה אחת:
+
+1. נכנסים ל־<https://render.com/deploy?repo=https://github.com/askezi-lgtm/mim>
+   (מתחברים ל־Render עם GitHub בפעם הראשונה).
+2. לוחצים **Apply / Deploy** — Render קורא את ה־blueprint ומקים שירות web בשם
+   `make-it-mem` (תוכנית Free, אזור Frankfurt, Node 22).
+3. אחרי ~2 דקות מקבלים כתובת כמו `https://make-it-mem.onrender.com` — זה הלינק
+   לשיתוף, וקישורי החדרים הם `https://<הכתובת>/ABCD`.
+
+לחלופין ידנית: New → Web Service → מחברים את הריפו → Build `npm ci --omit=dev`,
+Start `npm start`, Health check `/healthz`.
+
+**מה שכדאי לדעת על התוכנית החינמית:**
+
+- השירות נרדם אחרי ~15 דקות בלי תעבורה; הכניסה הראשונה אחרי שינה לוקחת
+  כ־30–60 שניות. משחק פעיל שומר אותו ער.
+- מצב המשחק חי בזיכרון התהליך, ולכן דיפלוי מחדש או הרדמה מאפסים חדרים פתוחים.
+- `autoDeploy: true` — כל push לענף שמוגדר ב־`render.yaml` מפרסם גרסה חדשה.
+  אם ממזגים לענף אחר, מעדכנים שם את `branch:`.
+
+תמיכה ב־WebSockets קיימת ב־Render גם בתוכנית החינמית, כך שה־Socket.IO עובד
+בלי הגדרות נוספות.
+
 ## הגדרות / Configuration
 
 | משתנה | ברירת מחדל | תיאור |
@@ -80,6 +107,7 @@ npm test
 server/index.js      Express + Socket.IO, חיווט האירועים
 server/game.js       חדרים, מכונת המצבים של המשחק, ניקוד, בוטים
 server/templates.js  קטלוג תבניות המם
+render.yaml          blueprint לפריסה ב-Render
 public/index.html    כל המסכים
 public/js/app.js     לקוח: מצב אחד, פונקציית render אחת
 public/js/meme.js    ציור המם על Canvas

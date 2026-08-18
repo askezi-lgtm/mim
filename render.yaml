@@ -1,0 +1,16 @@
+# Render blueprint — https://render.com/docs/blueprint-spec
+# One-click: https://render.com/deploy?repo=https://github.com/askezi-lgtm/mim
+services:
+  - type: web
+    name: make-it-mem
+    runtime: node
+    plan: free
+    region: frankfurt          # closest free region to Israel
+    branch: claude/makeitmem-game-hcvxxu
+    buildCommand: npm ci --omit=dev
+    startCommand: npm start
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
