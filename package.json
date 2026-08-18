@@ -1,0 +1,29 @@
+{
+  "name": "mim",
+  "version": "1.0.0",
+  "description": "Make It Mem - a realtime multiplayer meme-captioning party game",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "test": "node --test --test-force-exit test/game.test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "game",
+    "meme",
+    "multiplayer",
+    "party",
+    "socket.io"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5"
+  },
+  "devDependencies": {
+    "socket.io-client": "^4.8.3"
+  }
+}

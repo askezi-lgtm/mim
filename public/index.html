@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Make It Mem — משחק הממים</title>
+  <meta name="description" content="משחק מסיבות מרובה משתתפים: כותבים כיתוב מצחיק לתמונה, מדרגים את הממים של כולם וצוברים נקודות." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>😂</text></svg>" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div id="toast" class="toast" hidden></div>
+
+  <header class="topbar">
+    <button class="brand" id="brand" type="button">
+      <span class="brand-emoji">😂</span>
+      <span class="brand-text">Make It <b>Mem</b></span>
+    </button>
+    <div class="topbar-right">
+      <div class="room-chip" id="room-chip" hidden>
+        <span data-i18n="room">חדר</span>
+        <b id="room-chip-code">----</b>
+      </div>
+      <button class="ghost small" id="lang-toggle" type="button">EN</button>
+    </div>
+  </header>
+
+  <main id="app">
+    <!-- ------------------------------------------------------------- home -->
+    <section class="screen" id="screen-home">
+      <div class="card hero">
+        <h1 data-i18n="heroTitle">כתבו את המם. תנו ציון. תצחיקו הכי הרבה.</h1>
+        <p class="muted" data-i18n="heroSub">כל סיבוב מקבלים תמונה, כותבים כיתוב, ומדרגים את הממים של כולם. הכי מצחיק מנצח.</p>
+
+        <div class="identity">
+          <div class="avatar-picker" id="avatar-picker"></div>
+          <input id="name-input" class="input big" maxlength="16" placeholder="השם שלך" data-i18n-placeholder="namePlaceholder" autocomplete="nickname" />
+        </div>
+
+        <div class="actions">
+          <button class="primary big" id="create-btn" type="button" data-i18n="createRoom">פתחו חדר חדש</button>
+          <div class="join-row">
+            <input id="code-input" class="input code-input" maxlength="4" placeholder="קוד" data-i18n-placeholder="codePlaceholder" autocapitalize="characters" autocomplete="off" />
+            <button class="secondary" id="join-btn" type="button" data-i18n="joinRoom">הצטרפו</button>
+          </div>
+        </div>
+
+        <ol class="how">
+          <li data-i18n="how1">מזמינים חברים עם קוד החדר</li>
+          <li data-i18n="how2">כל אחד מקבל תמונה וכותב כיתוב</li>
+          <li data-i18n="how3">מדרגים את הממים של השאר מ‑1 עד 5</li>
+          <li data-i18n="how4">כל כוכב = 20 נקודות. הכי הרבה נקודות מנצח</li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- ------------------------------------------------------------ lobby -->
+    <section class="screen" id="screen-lobby" hidden>
+      <div class="card">
+        <div class="lobby-head">
+          <div>
+            <p class="muted" data-i18n="shareCode">שתפו את הקוד כדי שיצטרפו</p>
+            <div class="big-code" id="lobby-code">----</div>
+          </div>
+          <button class="secondary" id="copy-link" type="button" data-i18n="copyLink">העתיקו קישור</button>
+        </div>
+
+        <h3><span data-i18n="players">שחקנים</span> <span class="pill" id="player-count">0</span></h3>
+        <div class="player-grid" id="lobby-players"></div>
+
+        <div id="host-panel" hidden>
+          <h3 data-i18n="settings">הגדרות</h3>
+          <div class="settings">
+            <label>
+              <span><span data-i18n="rounds">סיבובים</span>: <span class="num"><b id="val-rounds">3</b></span></span>
+              <input type="range" id="set-rounds" min="1" max="10" step="1" />
+            </label>
+            <label>
+              <span><span data-i18n="writeTime">זמן כתיבה</span>: <span class="num"><b id="val-write">75</b>s</span></span>
+              <input type="range" id="set-write" min="20" max="180" step="5" />
+            </label>
+            <label>
+              <span><span data-i18n="voteTime">זמן דירוג</span>: <span class="num"><b id="val-vote">18</b>s</span></span>
+              <input type="range" id="set-vote" min="8" max="60" step="1" />
+            </label>
+          </div>
+          <div class="bot-row">
+            <span data-i18n="bots">בוטים לתרגול</span>
+            <button class="ghost" id="bot-remove" type="button">−</button>
+            <b id="bot-count">0</b>
+            <button class="ghost" id="bot-add" type="button">+</button>
+          </div>
+          <button class="primary big" id="start-btn" type="button" data-i18n="startGame">התחילו לשחק</button>
+        </div>
+        <p class="muted center" id="wait-host" data-i18n="waitHost" hidden>מחכים שהמארח יתחיל…</p>
+        <button class="ghost small center-block" id="leave-btn" type="button" data-i18n="leaveRoom">יציאה מהחדר</button>
+      </div>
+    </section>
+
+    <!-- ---------------------------------------------------------- writing -->
+    <section class="screen" id="screen-write" hidden>
+      <div class="card">
+        <div class="phase-head">
+          <div>
+            <span class="pill" id="write-round">סיבוב 1</span>
+            <h2 data-i18n="writeTitle">כתבו כיתוב מצחיק</h2>
+          </div>
+          <div class="timer" id="write-timer">0</div>
+        </div>
+        <div class="timerbar"><i id="write-bar"></i></div>
+
+        <div class="meme-stage">
+          <canvas id="write-canvas" class="meme-canvas"></canvas>
+        </div>
+
+        <div class="caption-inputs">
+          <input id="top-input" class="input" maxlength="90" placeholder="שורה עליונה" data-i18n-placeholder="topPlaceholder" />
+          <input id="bottom-input" class="input" maxlength="90" placeholder="שורה תחתונה" data-i18n-placeholder="bottomPlaceholder" />
+        </div>
+        <button class="primary big" id="submit-btn" type="button" data-i18n="submitMeme">שלחו מם</button>
+        <p class="muted center" id="write-progress"></p>
+      </div>
+    </section>
+
+    <!-- ----------------------------------------------------------- voting -->
+    <section class="screen" id="screen-vote" hidden>
+      <div class="card">
+        <div class="phase-head">
+          <div>
+            <span class="pill" id="vote-progress">1/1</span>
+            <h2 id="vote-title" data-i18n="voteTitle">כמה זה מצחיק?</h2>
+          </div>
+          <div class="timer" id="vote-timer">0</div>
+        </div>
+        <div class="timerbar"><i id="vote-bar"></i></div>
+
+        <div class="meme-stage">
+          <canvas id="vote-canvas" class="meme-canvas"></canvas>
+        </div>
+
+        <div class="rating" id="rating-row"></div>
+        <p class="muted center" id="vote-note"></p>
+      </div>
+    </section>
+
+    <!-- ----------------------------------------------------------- reveal -->
+    <section class="screen" id="screen-reveal" hidden>
+      <div class="card">
+        <div class="meme-stage">
+          <canvas id="reveal-canvas" class="meme-canvas"></canvas>
+        </div>
+        <div class="reveal-info">
+          <div class="author" id="reveal-author"></div>
+          <div class="score-pop" id="reveal-points">+0</div>
+          <div class="stars" id="reveal-stars"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ----------------------------------------------------------- scores -->
+    <section class="screen" id="screen-scores" hidden>
+      <div class="card">
+        <h2 data-i18n="scoreboard">טבלת ניקוד</h2>
+        <div class="board" id="score-board"></div>
+        <h3 data-i18n="roundBest">הממים של הסיבוב</h3>
+        <div class="results" id="round-results"></div>
+        <p class="muted center" id="next-round-in"></p>
+        <button class="secondary" id="skip-btn" type="button" hidden data-i18n="skip">דלגו</button>
+      </div>
+    </section>
+
+    <!-- ------------------------------------------------------------ final -->
+    <section class="screen" id="screen-final" hidden>
+      <div class="card">
+        <h2 class="center trophy">🏆 <span id="winner-name"></span></h2>
+        <div class="board" id="final-board"></div>
+        <div class="results" id="final-results"></div>
+        <div class="actions center">
+          <button class="primary" id="again-btn" type="button" hidden data-i18n="playAgain">שחקו שוב</button>
+          <button class="secondary" id="tolobby-btn" type="button" hidden data-i18n="backToLobby">חזרה ללובי</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <span class="muted small" data-i18n="footer">משחק מסיבות בהשראת Make It Meme · קוד פתוח</span>
+  </footer>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/js/i18n.js"></script>
+  <script src="/js/meme.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>
