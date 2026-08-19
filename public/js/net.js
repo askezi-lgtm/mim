@@ -44,13 +44,21 @@
 
   function socketTransport() {
     const socket = window.io({ transports: ['websocket', 'polling'] });
-    ['connect', 'disconnect', 'state'].forEach((event) =>
-      socket.on(event, (payload) => fire(event, payload))
-    );
+    let seat = null;
+
+    socket.on('state', (snapshot) => {
+      seat = { code: snapshot.code, playerId: snapshot.youId };
+      fire('state', snapshot);
+    });
+    ['connect', 'disconnect'].forEach((event) => socket.on(event, () => fire(event)));
+
     return {
       mode: 'socket',
       on,
-      emit: (event, payload, cb) => socket.emit(event, payload || {}, cb)
+      // Every action carries the seat: after a reconnect socket.io flushes
+      // whatever was queued while offline, and that can reach the server before
+      // room:rejoin does - on a socket the server has never seen before.
+      emit: (event, payload, cb) => socket.emit(event, { ...(payload || {}), seat }, cb)
     };
   }
 

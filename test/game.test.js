@@ -208,3 +208,39 @@ test('a player who joins mid-round gets a template right away', async (t) => {
   const hostView = await waitFor(host, (s) => s.writing && s.writing.total === 3, 'three submissions');
   assert.equal(hostView.writing.total, 3);
 });
+
+test('an action queued during a reconnect is not lost', async (t) => {
+  // Production bug: a phone that locks or switches apps drops its socket, and
+  // socket.io flushes the queued action on a brand new socket - before the
+  // client's room:rejoin lands. The action used to fail with ROOM_NOT_FOUND.
+  const { server, manager } = buildServer();
+  await new Promise((resolve) => server.listen(0, resolve));
+  const port = server.address().port;
+
+  const host = connect(port);
+  const guest = connect(port);
+  let reconnected;
+  t.after(() => {
+    [host, guest, reconnected].forEach((s) => s && s.close());
+    manager.rooms.forEach((r) => r.destroy());
+    clearInterval(manager.sweeper);
+    server.close();
+  });
+
+  const created = await emit(host, 'room:create', { name: 'Host' });
+  await emit(guest, 'room:join', { code: created.code, name: 'Guest' });
+  await waitFor(host, (s) => s.players.length === 2, 'both players');
+
+  host.close(); // the phone drops off the network
+  await waitFor(guest, (s) => s.players.some((p) => p.name === 'Host' && !p.connected), 'host away');
+
+  // A fresh socket the server has never seen, sending the action straight away.
+  reconnected = connect(port);
+  const seat = { code: created.code, playerId: created.playerId };
+  const started = await emit(reconnected, 'game:start', { seat });
+  assert.deepEqual(started, { ok: true }, 'the seat carried in the action was honoured');
+
+  const playing = await waitFor(reconnected, (s) => s.phase === 'writing', 'writing');
+  assert.equal(playing.youId, created.playerId, 'still the same player');
+  assert.ok(playing.writing.template, 'and they are dealt a template');
+});

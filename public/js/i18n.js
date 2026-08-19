@@ -60,6 +60,8 @@
       offline: 'מנותק',
       waitingOthers: 'מחכים לשאר…',
       connecting: 'מתחבר…',
+      offlineBanner: 'אין חיבור לשרת — מנסים להתחבר מחדש…',
+      roomGone: 'החדר כבר לא קיים (השרת עלה מחדש) — פתחו חדר חדש',
       reconnected: 'חזרנו לחדר',
       errors: {
         ROOM_NOT_FOUND: 'לא נמצא חדר עם הקוד הזה',
@@ -132,6 +134,8 @@
       offline: 'offline',
       waitingOthers: 'Waiting for the others…',
       connecting: 'Connecting…',
+      offlineBanner: 'Lost the connection — reconnecting…',
+      roomGone: 'That room is gone (the server restarted) — start a new one',
       reconnected: 'Back in the room',
       errors: {
         ROOM_NOT_FOUND: 'No room with that code',

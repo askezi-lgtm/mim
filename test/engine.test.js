@@ -91,17 +91,33 @@ test('drafts survive a writing phase nobody submitted', () => {
   assert.equal(state.submissions[0].top, 'AUTOSAVED');
 });
 
-test('polling players drop out of the lobby when they stop polling', () => {
+test('a lobby seat survives a blip and is reclaimed only after the grace period', () => {
   const state = engine.createRoom('POLL', T0);
   const a = engine.addPlayer(state, { name: 'A', mode: 'poll', now: T0 }).player.id;
   const b = engine.addPlayer(state, { name: 'B', mode: 'poll', now: T0 }).player.id;
   assert.equal(state.hostId, a);
 
-  const later = T0 + engine.PRESENCE_TTL_MS + 1000;
-  engine.touch(state, b, later, 'poll'); // only B is still polling
-  engine.tick(state, later);
-  assert.equal(state.players[a], undefined, 'a closed tab gives up its lobby seat');
-  assert.equal(state.hostId, b, 'the host badge moves to whoever is still here');
+  // A's phone locks: it stops polling but must still be able to come back.
+  const away = T0 + engine.PRESENCE_TTL_MS + 1000;
+  engine.touch(state, b, away, 'poll');
+  engine.tick(state, away);
+  assert.equal(state.players[a].connected, false, 'marked away');
+  assert.equal(state.hostId, a, 'the badge waits for them rather than jumping to B');
+
+  engine.touch(state, a, away + 5000, 'poll');
+  assert.equal(state.players[a].connected, true, 'A came back to the same seat');
+
+  // Gone for good: marked away first, then the seat is freed a grace later.
+  const away2 = away + 5000 + engine.PRESENCE_TTL_MS + 1000;
+  engine.touch(state, b, away2, 'poll');
+  engine.tick(state, away2);
+  assert.equal(state.players[a].connected, false);
+
+  const gone = away2 + engine.LOBBY_GRACE_MS + 1000;
+  engine.touch(state, b, gone, 'poll');
+  engine.tick(state, gone);
+  assert.equal(state.players[a], undefined, 'the abandoned lobby seat is reclaimed');
+  assert.equal(state.hostId, b, 'and the host badge follows');
 });
 
 test('a polling player who stalls mid-game keeps their seat and score', () => {
@@ -117,6 +133,7 @@ test('a polling player who stalls mid-game keeps their seat and score', () => {
   engine.tick(state, later);
   assert.equal(state.players[a].connected, false, 'marked away');
   assert.equal(state.players[a].score, 120, 'but the seat and the score are still theirs');
+  assert.equal(state.hostId, a, 'a mid-game blip does not hand over the host badge');
 });
 
 test('a rejoining player is dealt a template mid-writing', () => {

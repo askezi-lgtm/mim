@@ -61,6 +61,43 @@
     return false;
   }
 
+  const LOST_SEAT = ['ROOM_NOT_FOUND', 'SEAT_NOT_FOUND'];
+
+  /** The room (or our seat in it) is gone for good - back to the home screen. */
+  function dropSeat(error) {
+    store.seat = null;
+    state = null;
+    history.replaceState(null, '', '/');
+    render();
+    toast(error === 'ROOM_NOT_FOUND' ? I18N.t('roomGone') : I18N.errorText(error), 'error');
+  }
+
+  /**
+   * Send an action, and if the server does not recognise us any more - which
+   * happens when a reconnect lands before our rejoin - claim the seat again and
+   * retry the action once before bothering the player with an error.
+   */
+  function send(event, payload, cb, retried) {
+    net.emit(event, payload, (result) => {
+      const lost = result && LOST_SEAT.includes(result.error);
+      if (!lost || retried || !store.seat) return (cb || handleError)(result);
+
+      net.emit('room:rejoin', store.seat, (rejoin) => {
+        if (rejoin && rejoin.error) {
+          dropSeat(rejoin.error);
+          return;
+        }
+        send(event, payload, cb, true);
+      });
+    });
+  }
+
+  function setOffline(offline) {
+    const bar = $('offline-bar');
+    bar.hidden = !offline;
+    bar.textContent = I18N.t('offlineBanner');
+  }
+
   function showScreen(name) {
     document.querySelectorAll('.screen').forEach((el) => {
       el.hidden = el.id !== `screen-${name}`;
@@ -195,7 +232,7 @@
       button.appendChild(el('span', 'rate-emoji', emoji));
       button.appendChild(el('span', 'rate-label', I18N.t('ratings')[i]));
       button.addEventListener('click', () => {
-        net.emit('vote:cast', { rating: value }, handleError);
+        send('vote:cast', { rating: value });
         [...row.children].forEach((c) => c.classList.toggle('picked', c === button));
       });
       row.appendChild(button);
@@ -371,14 +408,11 @@
   /* ---------------------------------------------------------------- socket */
 
   net.on('connect', () => {
+    setOffline(false);
     const seat = store.seat;
     if (seat && seat.code && seat.playerId) {
       net.emit('room:rejoin', seat, (result) => {
-        if (result && result.error) {
-          store.seat = null;
-          state = null;
-          render();
-        }
+        if (result && result.error) dropSeat(result.error);
       });
     }
   });
@@ -398,16 +432,10 @@
     render();
   });
 
-  net.on('disconnect', () => toast(I18N.t('connecting'), 'warn'));
+  net.on('disconnect', () => setOffline(true));
 
   // Polling backend only: the room or our seat in it is gone for good.
-  net.on('seatlost', () => {
-    store.seat = null;
-    state = null;
-    history.replaceState(null, '', '/');
-    render();
-    toast(I18N.errorText('SEAT_NOT_FOUND'), 'error');
-  });
+  net.on('seatlost', (error) => dropSeat(error || 'SEAT_NOT_FOUND'));
 
   /* ----------------------------------------------------------------- wires */
 
@@ -476,9 +504,9 @@
 
   $('bot-add').addEventListener('click', () => net.emit('bot:add'));
   $('bot-remove').addEventListener('click', () => net.emit('bot:remove'));
-  $('start-btn').addEventListener('click', () => net.emit('game:start', {}, handleError));
+  $('start-btn').addEventListener('click', () => send('game:start', {}));
   $('skip-btn').addEventListener('click', () => net.emit('game:skip'));
-  $('again-btn').addEventListener('click', () => net.emit('game:start', {}, handleError));
+  $('again-btn').addEventListener('click', () => send('game:start', {}));
   $('tolobby-btn').addEventListener('click', () => net.emit('game:lobby'));
 
   ['top-input', 'bottom-input'].forEach((id) => {
@@ -492,11 +520,7 @@
   });
 
   $('submit-btn').addEventListener('click', () => {
-    net.emit(
-      'meme:submit',
-      { top: $('top-input').value, bottom: $('bottom-input').value },
-      handleError
-    );
+    send('meme:submit', { top: $('top-input').value, bottom: $('bottom-input').value });
   });
 
   $('lang-toggle').addEventListener('click', () => I18N.setLang(I18N.other));

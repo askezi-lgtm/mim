@@ -25,6 +25,7 @@ const MAX_TEXT = 90;
 const POINTS_PER_STAR = 20;
 const ROUND_WINNER_BONUS = 50;
 const PRESENCE_TTL_MS = 20000; // polling clients are "here" if seen this recently
+const LOBBY_GRACE_MS = 60000; // a phone that backgrounds keeps its lobby seat this long
 const ROOM_TTL_MS = 3 * 60 * 60 * 1000;
 
 const DEFAULT_SETTINGS = {
@@ -150,7 +151,8 @@ function addPlayer(state, { name, avatar, isBot = false, mode = 'socket', now })
     connected: true,
     isBot,
     mode: isBot ? 'bot' : mode,
-    lastSeen: now
+    lastSeen: now,
+    disconnectedAt: null
   };
   state.players[player.id] = player;
   state.order.push(player.id);
@@ -185,6 +187,7 @@ function touch(state, playerId, now, mode) {
   const wasConnected = player.connected;
   player.lastSeen = now;
   player.connected = true;
+  player.disconnectedAt = null;
   if (mode) player.mode = mode;
   if (!state.hostId || !state.players[state.hostId]) promoteHost(state, now);
   if (!wasConnected) {
@@ -201,11 +204,15 @@ function setConnected(state, playerId, connected, now) {
   if (!player) return;
   player.connected = connected;
   player.lastSeen = now;
+  player.disconnectedAt = connected ? null : now;
   if (connected) ensureSubmission(state, playerId);
-  if (!connected && state.hostId === playerId) promoteHost(state, now);
-  // A lobby drop-out gives up their seat; mid-game they keep score and template.
-  if (!connected && state.phase === 'lobby') removePlayer(state, playerId, now);
-  else bump(state, now);
+  // The host badge does not move on a blip - it follows the seat, and the seat
+  // is only reclaimed once the grace period expires (see applyPresence).
+  // Seats are never dropped on the spot: phones lose the network when they
+  // lock or switch apps, and the player must be able to come back. Lobby seats
+  // are reclaimed by the tick after LOBBY_GRACE_MS; mid-game seats are kept so
+  // the score and the template survive.
+  bump(state, now);
 }
 
 function updateSettings(state, patch = {}, now) {
@@ -498,14 +505,23 @@ function applyBots(state, now) {
   return changed;
 }
 
-/** Drop polling clients that stopped polling. */
+/** Mark absent players away, and eventually free their lobby seat. */
 function applyPresence(state, now) {
   let changed = false;
   for (const player of playerList(state)) {
-    if (player.isBot || !player.connected || player.mode !== 'poll') continue;
-    if (now - (player.lastSeen || 0) <= PRESENCE_TTL_MS) continue;
-    setConnected(state, player.id, false, now);
-    changed = true;
+    if (player.isBot) continue;
+    if (player.connected && player.mode === 'poll' && now - (player.lastSeen || 0) > PRESENCE_TTL_MS) {
+      setConnected(state, player.id, false, now);
+      changed = true;
+    }
+    if (
+      !player.connected &&
+      state.phase === 'lobby' &&
+      now - (player.disconnectedAt || player.lastSeen || 0) > LOBBY_GRACE_MS
+    ) {
+      removePlayer(state, player.id, now);
+      changed = true;
+    }
   }
   return changed;
 }
@@ -633,6 +649,7 @@ module.exports = {
   MAX_TEXT,
   DEFAULT_SETTINGS,
   PRESENCE_TTL_MS,
+  LOBBY_GRACE_MS,
   BOT_NAMES,
   BOT_AVATARS,
   createRoom,

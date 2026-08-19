@@ -16,9 +16,24 @@ function registerHandlers(io, manager) {
   io.on('connection', (socket) => {
     const roomOf = (code) => manager.get(code);
 
-    const currentRoom = () => {
-      const room = roomOf(socket.data.roomCode);
-      if (!room || !socket.data.playerId || !room.players.has(socket.data.playerId)) return null;
+    /**
+     * Find the caller's room. After a reconnect a client can flush an action it
+     * queued while offline before its room:rejoin lands, and that arrives on a
+     * brand new socket with no session data - so actions also carry their seat
+     * and we adopt it here instead of answering "no room with that code".
+     */
+    const currentRoom = (payload) => {
+      const known = roomOf(socket.data.roomCode);
+      if (known && socket.data.playerId && known.players.has(socket.data.playerId)) return known;
+
+      const claimed = payload && payload.seat;
+      if (!claimed || !claimed.code || !claimed.playerId) return null;
+      const room = roomOf(claimed.code);
+      if (!room || !room.players.has(claimed.playerId)) return null;
+      socket.data.roomCode = room.code;
+      socket.data.playerId = claimed.playerId;
+      socket.join(room.code);
+      room.attachSocket(claimed.playerId, socket.id);
       return room;
     };
 
@@ -69,21 +84,21 @@ function registerHandlers(io, manager) {
     });
 
     socket.on('player:update', (payload = {}) => {
-      const room = currentRoom();
+      const room = currentRoom(payload);
       if (!room) return;
       room.updatePlayer(socket.data.playerId, payload);
       room.broadcast();
     });
 
     socket.on('settings:update', (payload = {}) => {
-      const room = currentRoom();
+      const room = currentRoom(payload);
       if (!room || room.hostId !== socket.data.playerId) return;
       room.updateSettings(payload);
       room.broadcast();
     });
 
-    socket.on('bot:add', () => {
-      const room = currentRoom();
+    socket.on('bot:add', (payload = {}) => {
+      const room = currentRoom(payload);
       if (!room || room.hostId !== socket.data.playerId || room.phase !== 'lobby') return;
       const index = room.playerList.filter((p) => p.isBot).length;
       room.addPlayer({
@@ -94,8 +109,8 @@ function registerHandlers(io, manager) {
       room.broadcast();
     });
 
-    socket.on('bot:remove', () => {
-      const room = currentRoom();
+    socket.on('bot:remove', (payload = {}) => {
+      const room = currentRoom(payload);
       if (!room || room.hostId !== socket.data.playerId || room.phase !== 'lobby') return;
       const bots = room.playerList.filter((p) => p.isBot);
       const last = bots[bots.length - 1];
@@ -103,8 +118,8 @@ function registerHandlers(io, manager) {
       room.broadcast();
     });
 
-    socket.on('game:start', (_payload, cb) => {
-      const room = currentRoom();
+    socket.on('game:start', (payload = {}, cb) => {
+      const room = currentRoom(payload);
       if (!room) return ack(cb, { error: 'ROOM_NOT_FOUND' });
       if (room.hostId !== socket.data.playerId) return ack(cb, { error: 'NOT_HOST' });
       const { error } = room.start();
@@ -112,38 +127,38 @@ function registerHandlers(io, manager) {
       ack(cb, { ok: true });
     });
 
-    socket.on('game:skip', () => {
-      const room = currentRoom();
+    socket.on('game:skip', (payload = {}) => {
+      const room = currentRoom(payload);
       if (!room || room.hostId !== socket.data.playerId) return;
       room.skipPhase();
     });
 
-    socket.on('game:lobby', () => {
-      const room = currentRoom();
+    socket.on('game:lobby', (payload = {}) => {
+      const room = currentRoom(payload);
       if (!room || room.hostId !== socket.data.playerId) return;
       room.backToLobby();
     });
 
     socket.on('meme:submit', (payload = {}, cb) => {
-      const room = currentRoom();
+      const room = currentRoom(payload);
       if (!room) return ack(cb, { error: 'ROOM_NOT_FOUND' });
       ack(cb, room.submitMeme(socket.data.playerId, payload));
     });
 
     socket.on('meme:draft', (payload = {}) => {
-      const room = currentRoom();
+      const room = currentRoom(payload);
       if (!room) return;
       room.saveDraft(socket.data.playerId, payload);
     });
 
     socket.on('vote:cast', (payload = {}, cb) => {
-      const room = currentRoom();
+      const room = currentRoom(payload);
       if (!room) return ack(cb, { error: 'ROOM_NOT_FOUND' });
       ack(cb, room.castVote(socket.data.playerId, payload.rating));
     });
 
-    socket.on('room:leave', () => {
-      const room = currentRoom();
+    socket.on('room:leave', (payload = {}) => {
+      const room = currentRoom(payload);
       if (!room) return;
       const { playerId } = socket.data;
       socket.leave(room.code);
@@ -154,7 +169,7 @@ function registerHandlers(io, manager) {
     });
 
     socket.on('disconnect', () => {
-      const room = currentRoom();
+      const room = currentRoom(null);
       if (!room) return;
       room.detachSocket(socket.data.playerId);
       room.broadcast();
