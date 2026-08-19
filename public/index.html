@@ -187,7 +187,9 @@
     <span class="muted small" data-i18n="footer">משחק מסיבות בהשראת Make It Meme · קוד פתוח</span>
   </footer>
 
-  <script src="/socket.io/socket.io.js"></script>
+  <!-- Present on the Node deployment only; its absence switches the client to polling. -->
+  <script src="/socket.io/socket.io.js" onerror="window.__noSocketIO = true"></script>
+  <script src="/js/net.js"></script>
   <script src="/js/i18n.js"></script>
   <script src="/js/meme.js"></script>
   <script src="/js/app.js"></script>

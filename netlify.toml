@@ -1,0 +1,15 @@
+# Netlify deployment: static client from public/, game backend in functions.
+[build]
+  publish = "dist"
+  command = "node scripts/netlify-build.js"
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+  included_files = ["shared/**"]
+
+# /ABCD room links open the app (static files still win over this rule).
+[[redirects]]
+  from = "/:code"
+  to = "/index.html"
+  status = 200

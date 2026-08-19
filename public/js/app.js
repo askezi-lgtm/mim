@@ -32,12 +32,13 @@
     }
   };
 
-  const socket = io({ transports: ['websocket', 'polling'] });
+  const net = window.Net; // net.io on the Node server, HTTP polling on Netlify
   let state = null;
   let clockOffset = 0; // serverNow - clientNow
   let currentTemplateId = null;
   let draftTimer = null;
   let lastPhase = null;
+  let votingKey = null; // rebuild the rating row only when the meme changes
 
   /* --------------------------------------------------------------- helpers */
 
@@ -90,7 +91,7 @@
       button.addEventListener('click', () => {
         store.avatar = emoji;
         renderAvatarPicker();
-        if (state) socket.emit('player:update', { name: store.name, avatar: emoji });
+        if (state) net.emit('player:update', { name: store.name, avatar: emoji });
       });
       wrap.appendChild(button);
     });
@@ -177,43 +178,52 @@
   function saveDraft() {
     clearTimeout(draftTimer);
     draftTimer = setTimeout(() => {
-      socket.emit('meme:draft', { top: $('top-input').value, bottom: $('bottom-input').value });
+      net.emit('meme:draft', { top: $('top-input').value, bottom: $('bottom-input').value });
     }, 400);
   }
 
   /* ---------------------------------------------------------------- voting */
 
-  function renderVoting() {
-    const meme = state.meme;
-    if (!meme) return;
-    $('vote-progress').textContent = `${meme.index}/${meme.total}`;
-    MemeRender.draw($('vote-canvas'), meme);
-
+  function buildRatingRow() {
     const row = $('rating-row');
     row.innerHTML = '';
-    if (meme.isMine) {
-      $('vote-title').textContent = I18N.t('yourMeme');
-      $('vote-note').textContent = I18N.t('voteProgress', meme.voted, meme.voters);
-      return;
-    }
-    $('vote-title').textContent = I18N.t('voteTitle');
     RATING_EMOJI.forEach((emoji, i) => {
       const value = i + 1;
       const button = el('button', 'rate');
       button.type = 'button';
+      button.dataset.rating = String(value);
       button.appendChild(el('span', 'rate-emoji', emoji));
       button.appendChild(el('span', 'rate-label', I18N.t('ratings')[i]));
-      if (meme.yourRating === value) button.classList.add('picked');
       button.addEventListener('click', () => {
-        socket.emit('vote:cast', { rating: value }, handleError);
-        [...row.children].forEach((c) => c.classList.remove('picked'));
-        button.classList.add('picked');
+        net.emit('vote:cast', { rating: value }, handleError);
+        [...row.children].forEach((c) => c.classList.toggle('picked', c === button));
       });
       row.appendChild(button);
     });
-    $('vote-note').textContent = meme.yourRating
-      ? `${I18N.t('voteDone')} (${I18N.t('voteProgress', meme.voted, meme.voters)})`
-      : I18N.t('voteProgress', meme.voted, meme.voters);
+  }
+
+  function renderVoting() {
+    const meme = state.meme;
+    if (!meme) return;
+    $('vote-progress').textContent = `${meme.index}/${meme.total}`;
+
+    // Every incoming state re-renders, so only touch the buttons and the canvas
+    // when the meme itself changed - otherwise a tap can land on a fresh node.
+    const key = `${meme.index}:${meme.template.id}:${meme.isMine}:${I18N.lang}`;
+    if (key !== votingKey) {
+      votingKey = key;
+      MemeRender.draw($('vote-canvas'), meme);
+      if (meme.isMine) $('rating-row').innerHTML = '';
+      else buildRatingRow();
+    }
+
+    $('vote-title').textContent = meme.isMine ? I18N.t('yourMeme') : I18N.t('voteTitle');
+    [...$('rating-row').children].forEach((button) => {
+      button.classList.toggle('picked', Number(button.dataset.rating) === meme.yourRating);
+    });
+    const progress = I18N.t('voteProgress', meme.voted, meme.voters);
+    $('vote-note').textContent =
+      !meme.isMine && meme.yourRating ? `${I18N.t('voteDone')} (${progress})` : progress;
   }
 
   /* ---------------------------------------------------------------- reveal */
@@ -360,10 +370,10 @@
 
   /* ---------------------------------------------------------------- socket */
 
-  socket.on('connect', () => {
+  net.on('connect', () => {
     const seat = store.seat;
     if (seat && seat.code && seat.playerId) {
-      socket.emit('room:rejoin', seat, (result) => {
+      net.emit('room:rejoin', seat, (result) => {
         if (result && result.error) {
           store.seat = null;
           state = null;
@@ -373,12 +383,13 @@
     }
   });
 
-  socket.on('state', (snapshot) => {
+  net.on('state', (snapshot) => {
     clockOffset = snapshot.serverNow - Date.now();
     const previous = state;
     state = snapshot;
     store.seat = { code: snapshot.code, playerId: snapshot.youId };
     if (previous && previous.phase !== snapshot.phase) currentTemplateId = null;
+    if (snapshot.phase !== 'voting') votingKey = null;
     if (snapshot.phase !== 'writing') currentTemplateId = null;
     if (lastPhase !== snapshot.phase) {
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -387,14 +398,23 @@
     render();
   });
 
-  socket.on('disconnect', () => toast(I18N.t('connecting'), 'warn'));
+  net.on('disconnect', () => toast(I18N.t('connecting'), 'warn'));
+
+  // Polling backend only: the room or our seat in it is gone for good.
+  net.on('seatlost', () => {
+    store.seat = null;
+    state = null;
+    history.replaceState(null, '', '/');
+    render();
+    toast(I18N.errorText('SEAT_NOT_FOUND'), 'error');
+  });
 
   /* ----------------------------------------------------------------- wires */
 
   function joinFlow(event, payload) {
     const who = identity();
     if (!who) return;
-    socket.emit(event, { ...who, ...payload }, (result) => {
+    net.emit(event, { ...who, ...payload }, (result) => {
       if (handleError(result)) return;
       store.seat = { code: result.code, playerId: result.playerId };
       history.replaceState(null, '', `/${result.code}`);
@@ -428,7 +448,7 @@
   });
 
   $('leave-btn').addEventListener('click', () => {
-    socket.emit('room:leave');
+    net.emit('room:leave');
     store.seat = null;
     state = null;
     history.replaceState(null, '', '/');
@@ -450,16 +470,16 @@
       $(labelId).textContent = $(id).value;
     });
     $(id).addEventListener('change', () => {
-      socket.emit('settings:update', { [key]: Number($(id).value) });
+      net.emit('settings:update', { [key]: Number($(id).value) });
     });
   });
 
-  $('bot-add').addEventListener('click', () => socket.emit('bot:add'));
-  $('bot-remove').addEventListener('click', () => socket.emit('bot:remove'));
-  $('start-btn').addEventListener('click', () => socket.emit('game:start', {}, handleError));
-  $('skip-btn').addEventListener('click', () => socket.emit('game:skip'));
-  $('again-btn').addEventListener('click', () => socket.emit('game:start', {}, handleError));
-  $('tolobby-btn').addEventListener('click', () => socket.emit('game:lobby'));
+  $('bot-add').addEventListener('click', () => net.emit('bot:add'));
+  $('bot-remove').addEventListener('click', () => net.emit('bot:remove'));
+  $('start-btn').addEventListener('click', () => net.emit('game:start', {}, handleError));
+  $('skip-btn').addEventListener('click', () => net.emit('game:skip'));
+  $('again-btn').addEventListener('click', () => net.emit('game:start', {}, handleError));
+  $('tolobby-btn').addEventListener('click', () => net.emit('game:lobby'));
 
   ['top-input', 'bottom-input'].forEach((id) => {
     $(id).addEventListener('input', () => {
@@ -472,7 +492,7 @@
   });
 
   $('submit-btn').addEventListener('click', () => {
-    socket.emit(
+    net.emit(
       'meme:submit',
       { top: $('top-input').value, bottom: $('bottom-input').value },
       handleError

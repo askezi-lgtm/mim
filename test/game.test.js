@@ -7,9 +7,10 @@ const { io: ioClient } = require('socket.io-client');
 const express = require('express');
 const { Server } = require('socket.io');
 
-// The server module binds a port on require, so tests build their own stack
-// from the same pieces the real server uses.
+// server/index.js binds a port on require, so tests mount the real handlers
+// on their own throwaway server.
 const { RoomManager } = require('../server/game');
+const { registerHandlers } = require('../server/socket');
 
 function buildServer() {
   const app = express();
@@ -18,70 +19,6 @@ function buildServer() {
   const manager = new RoomManager(io);
   registerHandlers(io, manager);
   return { server, io, manager };
-}
-
-// Mirror of the socket wiring in server/index.js, kept minimal for tests.
-function registerHandlers(io, manager) {
-  io.on('connection', (socket) => {
-    const current = () => {
-      const room = manager.get(socket.data.roomCode);
-      if (!room || !room.players.has(socket.data.playerId)) return null;
-      return room;
-    };
-    socket.on('room:create', (p = {}, cb) => {
-      const room = manager.create();
-      const { player } = room.addPlayer({ ...p, socketId: socket.id });
-      socket.data.roomCode = room.code;
-      socket.data.playerId = player.id;
-      cb({ code: room.code, playerId: player.id });
-      room.broadcast();
-    });
-    socket.on('room:join', (p = {}, cb) => {
-      const room = manager.get(p.code);
-      if (!room) return cb({ error: 'ROOM_NOT_FOUND' });
-      const { player, error } = room.addPlayer({ ...p, socketId: socket.id });
-      if (error) return cb({ error });
-      socket.data.roomCode = room.code;
-      socket.data.playerId = player.id;
-      cb({ code: room.code, playerId: player.id });
-      room.broadcast();
-    });
-    socket.on('room:rejoin', (p = {}, cb) => {
-      const room = manager.get(p.code);
-      if (!room || !room.players.has(p.playerId)) return cb({ error: 'SEAT_NOT_FOUND' });
-      room.attachSocket(p.playerId, socket.id);
-      socket.data.roomCode = room.code;
-      socket.data.playerId = p.playerId;
-      cb({ code: room.code, playerId: p.playerId });
-      room.broadcast();
-    });
-    socket.on('settings:update', (p) => {
-      const room = current();
-      if (room && room.hostId === socket.data.playerId) {
-        room.updateSettings(p);
-        room.broadcast();
-      }
-    });
-    socket.on('game:start', (_p, cb) => {
-      const room = current();
-      cb(room ? room.start() : { error: 'ROOM_NOT_FOUND' });
-    });
-    socket.on('meme:submit', (p, cb) => {
-      const room = current();
-      cb(room.submitMeme(socket.data.playerId, p));
-    });
-    socket.on('vote:cast', (p, cb) => {
-      const room = current();
-      cb(room.castVote(socket.data.playerId, p.rating));
-    });
-    socket.on('disconnect', () => {
-      const room = current();
-      if (room) {
-        room.detachSocket(socket.data.playerId);
-        room.broadcast();
-      }
-    });
-  });
 }
 
 function connect(port) {
@@ -147,7 +84,7 @@ test('a full game runs from lobby to a winner', async (t) => {
   host.emit('settings:update', { rounds: 1, writeSeconds: 20, voteSeconds: 8, revealSeconds: 3 });
   await waitFor(host, (s) => s.settings.rounds === 1, 'settings applied');
 
-  assert.deepEqual(await emit(host, 'game:start', {}), {});
+  assert.deepEqual(await emit(host, 'game:start', {}), { ok: true });
   const writing = await waitFor(host, (s) => s.phase === 'writing', 'writing');
   assert.ok(writing.writing.template.url, 'each player gets a template');
   assert.equal(writing.writing.total, 3);
@@ -235,7 +172,10 @@ test('the lobby refuses to start a one-player game', async (t) => {
   });
 
   await emit(host, 'room:create', { name: 'Solo' });
-  assert.deepEqual(await emit(host, 'game:start', {}), { error: 'NEED_MORE_PLAYERS' });
+  assert.deepEqual(await emit(host, 'game:start', {}), {
+    error: 'NEED_MORE_PLAYERS',
+    minPlayers: 2
+  });
 });
 
 test('a player who joins mid-round gets a template right away', async (t) => {

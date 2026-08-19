@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
-    "test": "node --test --test-force-exit test/game.test.js"
+    "test": "node --test --test-force-exit test/engine.test.js test/api.test.js test/game.test.js",
+    "dev:serverless": "node scripts/serverless-dev.js"
   },
   "engines": {
     "node": ">=18"
@@ -20,6 +21,7 @@
   ],
   "license": "MIT",
   "dependencies": {
+    "@netlify/blobs": "^11.0.1",
     "express": "^4.19.2",
     "socket.io": "^4.7.5"
   },
