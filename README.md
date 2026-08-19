@@ -1,5 +1,6 @@
 # 😂 Make It Mem
 
+[![Deploy to Netlify](https://www.netlify.com/img/deploy/button.svg)](https://app.netlify.com/start/deploy?repository=https://github.com/askezi-lgtm/mim)
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/askezi-lgtm/mim)
 
 משחק מסיבות מרובה־משתתפים בהשראת [Make It Meme](https://makeitmeme.com):
@@ -15,7 +16,8 @@ English with one click.
 
 ```bash
 npm install
-npm start          # http://localhost:3000
+npm start              # http://localhost:3000  (Socket.IO)
+npm run dev:serverless # http://localhost:8888  (the Netlify-style polling backend)
 ```
 
 פותחים חדר, משתפים את הקוד בן 4 התווים (או את הקישור `http://<host>:3000/ABCD`),
@@ -57,37 +59,64 @@ npm start          # http://localhost:3000
 { id: 'my-meme', name: 'My meme', url: '/templates/my-meme.jpg' }
 ```
 
-## פריסה ל־Render / Deploy
+## פריסה / Deploy
 
-הריפו כולל [`render.yaml`](render.yaml), אז אפשר לפרוס בלחיצה אחת:
+המשחק רץ על שני סוגי אירוח, עם אותה חוקיות בדיוק ([`shared/engine.js`](shared/engine.js)):
 
-1. נכנסים ל־<https://render.com/deploy?repo=https://github.com/askezi-lgtm/mim>
-   (מתחברים ל־Render עם GitHub בפעם הראשונה).
-2. לוחצים **Apply / Deploy** — Render קורא את ה־blueprint ומקים שירות web בשם
-   `make-it-mem` (תוכנית Free, אזור Frankfurt, Node 22).
-3. אחרי ~2 דקות מקבלים כתובת כמו `https://make-it-mem.onrender.com` — זה הלינק
-   לשיתוף, וקישורי החדרים הם `https://<הכתובת>/ABCD`.
+| | **Netlify** | **Render** |
+| --- | --- | --- |
+| ריצה | Functions + Netlify Blobs | תהליך Node שרץ ברציפות |
+| עדכונים | polling כל 1.5 שניות | WebSockets (Socket.IO) |
+| קובץ הגדרה | [`netlify.toml`](netlify.toml) | [`render.yaml`](render.yaml) |
+| השהיה בין שחקנים | ~1.5 שניות | מיידית |
+| שינה / התעוררות | אין | התוכנית החינמית נרדמת אחרי ~15 דק' |
 
-לחלופין ידנית: New → Web Service → מחברים את הריפו → Build `npm ci --omit=dev`,
-Start `npm start`, Health check `/healthz`.
+### Netlify (לינק בלחיצה אחת)
 
-**מה שכדאי לדעת על התוכנית החינמית:**
+1. <https://app.netlify.com/start/deploy?repository=https://github.com/askezi-lgtm/mim>
+2. מאשרים ל‑Netlify גישה לריפו ולוחצים **Deploy** — היא קוראת את `netlify.toml`,
+   מריצה `node scripts/netlify-build.js` ומפרסמת את `dist/` יחד עם הפונקציה.
+3. מקבלים כתובת `https://<שם-הפרויקט>.netlify.app`; קישורי חדרים הם `/ABCD`.
 
-- השירות נרדם אחרי ~15 דקות בלי תעבורה; הכניסה הראשונה אחרי שינה לוקחת
-  כ־30–60 שניות. משחק פעיל שומר אותו ער.
-- מצב המשחק חי בזיכרון התהליך, ולכן דיפלוי מחדש או הרדמה מאפסים חדרים פתוחים.
-- `autoDeploy: true` — כל push לענף שמוגדר ב־`render.yaml` מפרסם גרסה חדשה.
-  אם ממזגים לענף אחר, מעדכנים שם את `branch:`.
+אין מה להגדיר ידנית: Netlify Blobs נדלק אוטומטית לפרויקטים שנבנים אצלה,
+ושם ה‑store (`mim-rooms`) מוגדר בקוד.
 
-תמיכה ב־WebSockets קיימת ב־Render גם בתוכנית החינמית, כך שה־Socket.IO עובד
-בלי הגדרות נוספות.
+### Render (WebSockets מלאים)
+
+1. <https://render.com/deploy?repo=https://github.com/askezi-lgtm/mim>
+2. לוחצים **Apply** — Render קוראת את `render.yaml` ומקימה שירות web חינמי
+   (Frankfurt, Node 22, health check `/healthz`).
+3. מקבלים כתובת `https://<שם-השירות>.onrender.com`.
+
+בתוכנית החינמית של Render השירות נרדם אחרי ~15 דקות ללא תעבורה (הכניסה
+הראשונה אחריה לוקחת 30–60 שניות), ומצב המשחק חי בזיכרון — דיפלוי מחדש מאפס
+חדרים פתוחים.
+
+## איך הגרסה ה־serverless עובדת
+
+ב־Netlify אין תהליך שרץ ברציפות ואין WebSockets, אז:
+
+- החדר נשמר כאובייקט JSON ב־Netlify Blobs, מפתח אחד לכל קוד חדר.
+- כל בקשה טוענת את החדר, מריצה `engine.tick(state, now)` — שמחיל דדליינים,
+  מהלכי בוטים ונוכחות — וכותבת חזרה בכתיבה מותנית (compare-and-swap לפי ETag),
+  כך ששתי הפעלות מקבילות לא דורסות זו את זו.
+- `tick` אידמפוטנטי ומהלכי הבוטים נגזרים מ־hash ולא מ־`Math.random`, ולכן שתי
+  הפעלות שמעבדות את אותו מצב מגיעות לאותה תוצאה.
+- הלקוח שולח פעולות ל־`POST /api/rpc` ומושך מצב מ־`GET /api/state` כל 1.5
+  שניות (4 שניות כשהלשונית ברקע). קריאה שלא שינתה כלום לא כותבת ל־Blobs.
+- [`public/js/net.js`](public/js/net.js) מסתיר את ההבדל: אם `socket.io` נטען —
+  משתמשים בו; אחרת עוברים ל־polling. שאר הלקוח זהה בשתי הפריסות.
+
+**מה לשים לב אליו:** כל poll הוא קריאת פונקציה, כך שמשחק ארוך עם הרבה שחקנים
+צורך מהמכסה החינמית של Netlify; והשהיית התגובה היא עד ~1.5 שניות במקום מיידית.
 
 ## הגדרות / Configuration
 
 | משתנה | ברירת מחדל | תיאור |
 | --- | --- | --- |
-| `PORT` | `3000` | פורט ההאזנה |
+| `PORT` | `3000` | פורט ההאזנה (שרת Socket.IO) |
 | `HOST` | `0.0.0.0` | כתובת ההאזנה |
+| `MIM_PUBLISH_DIR` | `public` | איזו תיקייה `dev:serverless` מגיש (`dist` לבדיקת הבנייה) |
 
 הגדרות המשחק (סיבובים, זמן כתיבה, זמן דירוג) נקבעות בלובי על ידי המארח.
 ברירות המחדל והגבולות מוגדרים ב־[`server/game.js`](server/game.js).
@@ -98,8 +127,14 @@ Start `npm start`, Health check `/healthz`.
 npm test
 ```
 
-בדיקות אינטגרציה מלאות מול Socket.IO אמיתי: משחק שלם מהלובי ועד המנצח,
-התנתקות וחיבור מחדש באמצע סיבוב, וסירוב להתחיל משחק עם שחקן אחד.
+16 בדיקות על שלוש שכבות:
+
+- **engine** — משחק שלם מול שעון מזויף, אידמפוטנטיות של `tick`, דטרמיניזם של
+  הבוטים, שמירת טיוטות ותפוגת נוכחות.
+- **api** (נתיב Netlify) — משחק שלם מעל בקשות HTTP, כתיבה רק כשמשהו זז,
+  התאוששות מתחרות על כתיבה (CAS), ותשובות 404 לחדר/מושב שלא קיימים.
+- **game** (נתיב Socket.IO) — משחק שלם מקצה לקצה מול Socket.IO אמיתי,
+  התנתקות וחיבור מחדש באמצע סיבוב, הצטרפות באמצע, וסירוב להתחיל עם שחקן אחד.
 
 ## מבנה הפרויקט / Project layout
 
@@ -126,6 +161,9 @@ test/game.test.js    בדיקות אינטגרציה
 | `game:start`, `game:skip`, `game:lobby` | מארח בלבד |
 | `meme:draft`, `meme:submit` | שמירת טיוטה / שליחת מם |
 | `vote:cast` | דירוג 1–5 |
+
+בפריסת Netlify אותם שמות ממופים ל־`POST /api/rpc` עם `op` מתאים
+(ראו [`public/js/net.js`](public/js/net.js)), והמצב נמשך מ־`GET /api/state`.
 
 השרת משדר `state` — תמונת מצב מלאה ומותאמת אישית לכל שחקן (כולל מי המחבר
 רק בשלב החשיפה). הלקוח פשוט מצייר מחדש את המסך לפי המצב האחרון.
