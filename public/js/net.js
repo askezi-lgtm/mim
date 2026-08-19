@@ -136,6 +136,11 @@
       const op = OPS[event];
       if (!op) return;
 
+      // After a reload the transport has no seat of its own; the caller's does.
+      if (!code && payload.seat && payload.seat.code) {
+        code = payload.seat.code;
+        playerId = payload.seat.playerId;
+      }
       if (op === 'join' || op === 'rejoin') {
         code = (payload.code || code || '').toUpperCase();
         if (payload.playerId) playerId = payload.playerId;

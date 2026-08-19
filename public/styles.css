@@ -79,6 +79,12 @@ p { margin: .4rem 0; }
   font-size: .9rem;
 }
 .room-chip b { letter-spacing: .12em; color: var(--brand); }
+.room-chip { cursor: pointer; color: var(--text); font: inherit; font-size: .9rem; }
+.room-chip:hover { border-color: var(--bad); }
+.room-chip .chip-x { color: var(--muted); margin-inline-start: .3rem; }
+.room-chip:hover .chip-x { color: var(--bad); }
+
+.card.resume { margin-bottom: .8rem; border-color: var(--brand); }
 
 main {
   flex: 1;

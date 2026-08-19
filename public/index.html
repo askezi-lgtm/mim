@@ -18,10 +18,11 @@
       <span class="brand-text">Make It <b>Mem</b></span>
     </button>
     <div class="topbar-right">
-      <div class="room-chip" id="room-chip" hidden>
+      <button class="room-chip" id="room-chip" type="button" hidden>
         <span data-i18n="room">חדר</span>
         <b id="room-chip-code">----</b>
-      </div>
+        <span class="chip-x">✕</span>
+      </button>
       <button class="ghost small" id="lang-toggle" type="button">EN</button>
     </div>
   </header>
@@ -29,6 +30,14 @@
   <main id="app">
     <!-- ------------------------------------------------------------- home -->
     <section class="screen" id="screen-home">
+      <div class="card resume" id="resume-card" hidden>
+        <p id="resume-text" class="center"></p>
+        <div class="actions center">
+          <button class="primary" id="resume-btn" type="button" data-i18n="resumeGame">חזרה למשחק</button>
+          <button class="ghost" id="forget-btn" type="button" data-i18n="forgetGame">משחק חדש</button>
+        </div>
+      </div>
+
       <div class="card hero">
         <h1 data-i18n="heroTitle">כתבו את המם. תנו ציון. תצחיקו הכי הרבה.</h1>
         <p class="muted" data-i18n="heroSub">כל סיבוב מקבלים תמונה, כותבים כיתוב, ומדרגים את הממים של כולם. הכי מצחיק מנצח.</p>

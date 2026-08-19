@@ -2,6 +2,7 @@
 (function () {
   'use strict';
 
+  const RESUME_WINDOW_MS = 5 * 60 * 1000; // auto-rejoin only a very recent seat
   const AVATARS = ['😂', '😎', '🤡', '👽', '🐸', '🦄', '🐙', '🍕', '👻', '🔥', '🧠', '🦖', '🌮', '💀', '🐧', '🥑'];
   const RATING_EMOJI = ['💩', '😐', '🙂', '😂', '🤣'];
 
@@ -27,7 +28,7 @@
       }
     },
     set seat(v) {
-      if (v) localStorage.setItem('mim:seat', JSON.stringify(v));
+      if (v) localStorage.setItem('mim:seat', JSON.stringify({ ...v, at: v.at || Date.now() }));
       else localStorage.removeItem('mim:seat');
     }
   };
@@ -67,6 +68,7 @@
   function dropSeat(error) {
     store.seat = null;
     state = null;
+    $('resume-card').hidden = true;
     history.replaceState(null, '', '/');
     render();
     toast(error === 'ROOM_NOT_FOUND' ? I18N.t('roomGone') : I18N.errorText(error), 'error');
@@ -453,6 +455,7 @@
       $('room-chip').hidden = true;
       return;
     }
+    $('resume-card').hidden = true;
     $('room-chip').hidden = false;
     $('room-chip-code').textContent = state.code;
 
@@ -514,18 +517,37 @@
   net.on('connect', () => {
     setOffline(false);
     const seat = store.seat;
-    if (seat && seat.code && seat.playerId) {
-      net.emit('room:rejoin', seat, (result) => {
-        if (result && result.error) dropSeat(result.error);
-      });
+    if (!seat || !seat.code || !seat.playerId) return;
+
+    // A seat that was live seconds ago means a blip or a reload mid-game: go
+    // straight back in. An older one is an abandoned game - offer it instead of
+    // dragging the player into it.
+    if (state || Date.now() - (seat.at || 0) < RESUME_WINDOW_MS) {
+      rejoinSeat(seat);
+    } else {
+      showResume(seat);
     }
   });
+
+  function rejoinSeat(seat, onFail) {
+    net.emit('room:rejoin', seat, (result) => {
+      if (result && result.error) {
+        dropSeat(result.error);
+        if (onFail) onFail(result.error);
+      }
+    });
+  }
+
+  function showResume(seat) {
+    $('resume-text').textContent = I18N.t('resumeText', seat.code);
+    $('resume-card').hidden = false;
+  }
 
   net.on('state', (snapshot) => {
     clockOffset = snapshot.serverNow - Date.now();
     const previous = state;
     state = snapshot;
-    store.seat = { code: snapshot.code, playerId: snapshot.youId };
+    store.seat = { code: snapshot.code, playerId: snapshot.youId, at: Date.now() };
     if (previous && previous.phase !== snapshot.phase) currentTemplateId = null;
     if (snapshot.phase !== 'voting') votingKey = null;
     if (snapshot.phase !== 'writing') {
@@ -551,7 +573,7 @@
     if (!who) return;
     net.emit(event, { ...who, ...payload }, (result) => {
       if (handleError(result)) return;
-      store.seat = { code: result.code, playerId: result.playerId };
+      store.seat = { code: result.code, playerId: result.playerId, at: Date.now() };
       history.replaceState(null, '', `/${result.code}`);
     });
   }
@@ -590,9 +612,26 @@
     render();
   });
 
-  $('brand').addEventListener('click', () => {
+  const confirmLeave = () => {
     if (!state) return;
-    if (confirm(`${I18N.t('leaveRoom')}?`)) $('leave-btn').click();
+    if (confirm(I18N.t('leaveConfirm'))) $('leave-btn').click();
+  };
+  $('brand').addEventListener('click', confirmLeave);
+  $('room-chip').addEventListener('click', confirmLeave);
+
+  $('resume-btn').addEventListener('click', () => {
+    const seat = store.seat;
+    $('resume-card').hidden = true;
+    if (seat) rejoinSeat(seat);
+  });
+
+  $('forget-btn').addEventListener('click', () => {
+    net.emit('room:leave', { seat: store.seat });
+    store.seat = null;
+    $('resume-card').hidden = true;
+    // The old room code is still in the URL and the join box - clear both.
+    $('code-input').value = '';
+    history.replaceState(null, '', '/');
   });
 
   const settingInputs = [
