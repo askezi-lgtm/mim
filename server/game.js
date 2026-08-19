@@ -134,6 +134,10 @@ class Room {
     return this.apply(() => engine.submitMeme(this.state, playerId, payload, Date.now()));
   }
 
+  swapTemplate(playerId) {
+    return this.apply(() => engine.swapTemplate(this.state, playerId, Date.now()));
+  }
+
   castVote(playerId, rating) {
     return this.apply(() => engine.castVote(this.state, playerId, rating, Date.now()));
   }

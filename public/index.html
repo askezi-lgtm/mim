@@ -84,6 +84,10 @@
               <span><span data-i18n="voteTime">זמן דירוג</span>: <span class="num"><b id="val-vote">18</b>s</span></span>
               <input type="range" id="set-vote" min="8" max="60" step="1" />
             </label>
+            <label>
+              <span><span data-i18n="swaps">החלפות תמונה</span>: <span class="num"><b id="val-swaps">20</b></span></span>
+              <input type="range" id="set-swaps" min="0" max="20" step="1" />
+            </label>
           </div>
           <div class="bot-row">
             <span data-i18n="bots">בוטים לתרגול</span>
@@ -111,12 +115,14 @@
         <div class="timerbar"><i id="write-bar"></i></div>
 
         <div class="meme-stage">
-          <canvas id="write-canvas" class="meme-canvas"></canvas>
+          <canvas id="write-canvas" class="meme-canvas draggable"></canvas>
         </div>
+        <p class="hint center" id="drag-hint" data-i18n="dragHint">גררו שורה על התמונה כדי להזיז אותה</p>
 
-        <div class="caption-inputs">
-          <input id="top-input" class="input" maxlength="90" placeholder="שורה עליונה" data-i18n-placeholder="topPlaceholder" />
-          <input id="bottom-input" class="input" maxlength="90" placeholder="שורה תחתונה" data-i18n-placeholder="bottomPlaceholder" />
+        <div class="caption-inputs" id="caption-rows"></div>
+        <div class="write-tools">
+          <button class="ghost" id="add-line" type="button" data-i18n="addLine">＋ שורה</button>
+          <button class="secondary" id="swap-btn" type="button" data-i18n="swapTemplate">🎲 החליפו תמונה</button>
         </div>
         <button class="primary big" id="submit-btn" type="button" data-i18n="submitMeme">שלחו מם</button>
         <p class="muted center" id="write-progress"></p>

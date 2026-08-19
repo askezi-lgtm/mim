@@ -88,7 +88,7 @@ test('drafts survive a writing phase nobody submitted', () => {
   engine.tick(state, T0 + 21000);
   assert.equal(state.phase, 'voting');
   assert.equal(state.submissions.length, 1, 'only the drafted meme made it through');
-  assert.equal(state.submissions[0].top, 'AUTOSAVED');
+  assert.equal(state.submissions[0].captions[0].text, 'AUTOSAVED');
 });
 
 test('a lobby seat survives a blip and is reclaimed only after the grace period', () => {
@@ -145,4 +145,50 @@ test('a rejoining player is dealt a template mid-writing', () => {
   engine.setConnected(state, ids[1], true, T0 + 2000);
   const snapshot = engine.snapshotFor(state, ids[1], T0 + 2000);
   assert.ok(snapshot.writing.template, 'the returning player can still play this round');
+});
+
+test('a player can swap the template they were dealt, keeping what they wrote', () => {
+  const { state, ids } = roomWith(['A', 'B'], T0, { swapsPerRound: 2 });
+  engine.startGame(state, T0);
+  const mine = () => state.submissions.find((s) => s.authorId === ids[0]);
+  engine.saveDraft(state, ids[0], { captions: [{ text: 'KEEP ME', y: 0.4 }] }, T0);
+
+  const first = mine().template.id;
+  const swapped = engine.swapTemplate(state, ids[0], T0 + 1000);
+  assert.equal(swapped.error, undefined);
+  assert.notEqual(mine().template.id, first, 'a different template');
+  assert.equal(swapped.swapsLeft, 1);
+  assert.deepEqual(mine().captions, [{ text: 'KEEP ME', y: 0.4 }], 'the caption is untouched');
+
+  engine.swapTemplate(state, ids[0], T0 + 2000);
+  assert.deepEqual(engine.swapTemplate(state, ids[0], T0 + 3000), { error: 'NO_SWAPS_LEFT' });
+  assert.equal(engine.swapTemplate(state, ids[1], T0 + 3000).error, undefined, 'per player, not per room');
+});
+
+test('captions are a free-form list, not just a top and a bottom', () => {
+  const { state, ids } = roomWith(['A', 'B']);
+  engine.startGame(state, T0);
+  const captions = [
+    { text: 'ONE', y: 0.05 },
+    { text: 'TWO', y: 0.5 },
+    { text: 'THREE', y: 0.77 },
+    { text: 'FOUR', y: 0.95 }
+  ];
+  const mine = () => state.submissions.find((s) => s.authorId === ids[0]);
+
+  engine.submitMeme(state, ids[0], { captions }, T0);
+  assert.deepEqual(mine().captions, captions, 'four lines with their own positions survive');
+
+  // Out-of-range values are clamped and the list is capped.
+  engine.submitMeme(state, ids[0], { captions: [{ text: 'X', y: 9 }, ...captions, ...captions] }, T0);
+  assert.equal(mine().captions.length, engine.MAX_CAPTIONS);
+  assert.equal(mine().captions[0].y, 0.98, 'y is clamped to the image');
+
+  // The old top/bottom shape still works - and B submitting ends the phase.
+  engine.submitMeme(state, ids[1], { top: 'LEGACY', bottom: 'PAIR' }, T0);
+  const legacy = state.submissions.find((s) => s.authorId === ids[1]);
+  assert.equal(legacy.captions.length, 2);
+  assert.equal(legacy.captions[0].text, 'LEGACY');
+  assert.equal(legacy.captions[1].text, 'PAIR');
+  assert.equal(state.phase, 'voting');
 });

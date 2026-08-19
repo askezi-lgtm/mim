@@ -177,9 +177,11 @@
     $('set-rounds').value = state.settings.rounds;
     $('set-write').value = state.settings.writeSeconds;
     $('set-vote').value = state.settings.voteSeconds;
+    $('set-swaps').value = state.settings.swapsPerRound;
     $('val-rounds').textContent = state.settings.rounds;
     $('val-write').textContent = state.settings.writeSeconds;
     $('val-vote').textContent = state.settings.voteSeconds;
+    $('val-swaps').textContent = state.settings.swapsPerRound;
 
     const canStart = state.players.filter((p) => p.connected || p.isBot).length >= state.minPlayers;
     $('start-btn').disabled = !canStart;
@@ -187,36 +189,138 @@
 
   /* --------------------------------------------------------------- writing */
 
+  // The captions being edited live here while writing: the server only hears
+  // about them through autosaved drafts, so typing is never interrupted by an
+  // incoming state (another player submitting, a timer tick, a swap).
+  let captions = [];
+  let writeRound = null;
+  let activeLine = 0;
+
   function renderWriting() {
     const w = state.writing || {};
     $('write-round').textContent = I18N.t('round', state.round, state.settings.rounds);
+
+    if (state.round !== writeRound) {
+      writeRound = state.round;
+      captions = (w.captions || []).map((caption) => ({ ...caption }));
+      activeLine = 0;
+      renderCaptionRows();
+    }
     if (w.template && w.template.id !== currentTemplateId) {
       currentTemplateId = w.template.id;
-      $('top-input').value = w.top || '';
-      $('bottom-input').value = w.bottom || '';
     }
+
     drawWriteCanvas();
+
+    const swaps = w.swapsLeft || 0;
+    $('swap-btn').textContent = swaps ? I18N.t('swapsLeft', swaps) : I18N.t('noSwapsLeft');
+    $('swap-btn').disabled = swaps <= 0;
+    $('add-line').disabled = captions.length >= (w.maxCaptions || 5);
+
     $('submit-btn').textContent = w.submitted ? I18N.t('updateMeme') : I18N.t('submitMeme');
     $('submit-btn').classList.toggle('done', Boolean(w.submitted));
     const progress = I18N.t('writeProgress', w.done || 0, w.total || 0);
     $('write-progress').textContent = w.submitted ? `${I18N.t('submitted')} · ${progress}` : progress;
   }
 
+  /** One row per caption; the rows are rebuilt only when lines are added or removed. */
+  function renderCaptionRows() {
+    const wrap = $('caption-rows');
+    wrap.innerHTML = '';
+    captions.forEach((caption, index) => {
+      const row = el('div', 'caption-row');
+      if (index === activeLine) row.classList.add('active');
+
+      const input = document.createElement('input');
+      input.className = 'input';
+      input.maxLength = (state && state.maxTextLength) || 90;
+      input.value = caption.text || '';
+      input.placeholder =
+        captions.length === 2 && index === 0
+          ? I18N.t('topPlaceholder')
+          : captions.length === 2 && index === 1
+            ? I18N.t('bottomPlaceholder')
+            : I18N.t('linePlaceholder', index + 1);
+      input.addEventListener('input', () => {
+        captions[index].text = input.value;
+        drawWriteCanvas();
+        saveDraft();
+      });
+      input.addEventListener('focus', () => setActiveLine(index));
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') $('submit-btn').click();
+      });
+      row.appendChild(input);
+
+      if (captions.length > 1) {
+        const remove = el('button', 'drop-line', '×');
+        remove.type = 'button';
+        remove.title = I18N.t('removeLine');
+        remove.addEventListener('click', () => {
+          captions.splice(index, 1);
+          activeLine = Math.max(0, Math.min(activeLine, captions.length - 1));
+          renderCaptionRows();
+          drawWriteCanvas();
+          saveDraft();
+        });
+        row.appendChild(remove);
+      }
+      wrap.appendChild(row);
+    });
+  }
+
+  function setActiveLine(index) {
+    activeLine = index;
+    [...$('caption-rows').children].forEach((row, i) => row.classList.toggle('active', i === index));
+  }
+
   function drawWriteCanvas() {
     const w = state && state.writing;
     if (!w || !w.template) return;
-    MemeRender.draw($('write-canvas'), {
-      template: w.template,
-      top: $('top-input').value,
-      bottom: $('bottom-input').value
-    });
+    MemeRender.draw($('write-canvas'), { template: w.template, captions });
   }
 
   function saveDraft() {
     clearTimeout(draftTimer);
     draftTimer = setTimeout(() => {
-      net.emit('meme:draft', { top: $('top-input').value, bottom: $('bottom-input').value });
+      net.emit('meme:draft', { captions });
     }, 400);
+  }
+
+  /* Dragging a caption around the image (mouse and touch alike). */
+  function bindCanvasDragging() {
+    const canvas = $('write-canvas');
+    let dragging = null;
+
+    const ratioY = (event) => {
+      const rect = canvas.getBoundingClientRect();
+      return Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height));
+    };
+
+    canvas.addEventListener('pointerdown', (event) => {
+      if (!captions.some((caption) => caption.text)) return;
+      const index = MemeRender.captionAt(canvas, ratioY(event));
+      if (index === null || index === undefined) return;
+      dragging = index;
+      setActiveLine(index);
+      canvas.setPointerCapture(event.pointerId);
+      event.preventDefault();
+    });
+
+    canvas.addEventListener('pointermove', (event) => {
+      if (dragging === null) return;
+      captions[dragging].y = Math.min(0.98, Math.max(0.02, ratioY(event)));
+      drawWriteCanvas();
+      event.preventDefault();
+    });
+
+    const release = () => {
+      if (dragging === null) return;
+      dragging = null;
+      saveDraft();
+    };
+    canvas.addEventListener('pointerup', release);
+    canvas.addEventListener('pointercancel', release);
   }
 
   /* ---------------------------------------------------------------- voting */
@@ -424,7 +528,10 @@
     store.seat = { code: snapshot.code, playerId: snapshot.youId };
     if (previous && previous.phase !== snapshot.phase) currentTemplateId = null;
     if (snapshot.phase !== 'voting') votingKey = null;
-    if (snapshot.phase !== 'writing') currentTemplateId = null;
+    if (snapshot.phase !== 'writing') {
+      currentTemplateId = null;
+      writeRound = null;
+    }
     if (lastPhase !== snapshot.phase) {
       window.scrollTo({ top: 0, behavior: 'smooth' });
       lastPhase = snapshot.phase;
@@ -491,7 +598,8 @@
   const settingInputs = [
     ['set-rounds', 'rounds', 'val-rounds'],
     ['set-write', 'writeSeconds', 'val-write'],
-    ['set-vote', 'voteSeconds', 'val-vote']
+    ['set-vote', 'voteSeconds', 'val-vote'],
+    ['set-swaps', 'swapsPerRound', 'val-swaps']
   ];
   settingInputs.forEach(([id, key, labelId]) => {
     $(id).addEventListener('input', () => {
@@ -509,23 +617,38 @@
   $('again-btn').addEventListener('click', () => send('game:start', {}));
   $('tolobby-btn').addEventListener('click', () => net.emit('game:lobby'));
 
-  ['top-input', 'bottom-input'].forEach((id) => {
-    $(id).addEventListener('input', () => {
-      drawWriteCanvas();
-      saveDraft();
-    });
-    $(id).addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') $('submit-btn').click();
+  $('add-line').addEventListener('click', () => {
+    const max = (state && state.writing && state.writing.maxCaptions) || 5;
+    if (captions.length >= max) return;
+    const used = captions.map((caption) => caption.y);
+    // Drop the new line into the emptiest part of the image.
+    const spot = [0.5, 0.28, 0.72, 0.08, 0.92].find(
+      (y) => !used.some((taken) => Math.abs(taken - y) < 0.12)
+    );
+    captions.push({ text: '', y: spot === undefined ? 0.5 : spot });
+    activeLine = captions.length - 1;
+    renderCaptionRows();
+    $('caption-rows').lastChild.querySelector('input').focus();
+    saveDraft();
+  });
+
+  $('swap-btn').addEventListener('click', () => {
+    send('meme:swap', {}, (result) => {
+      if (result && result.error) toast(I18N.errorText(result.error), 'error');
     });
   });
 
   $('submit-btn').addEventListener('click', () => {
-    send('meme:submit', { top: $('top-input').value, bottom: $('bottom-input').value });
+    send('meme:submit', { captions });
   });
+
+  bindCanvasDragging();
 
   $('lang-toggle').addEventListener('click', () => I18N.setLang(I18N.other));
   I18N.onChange(() => {
     $('lang-toggle').textContent = I18N.t('langButton');
+    // Caption rows keep the player's text but their placeholders are localised.
+    if (state && state.phase === 'writing') renderCaptionRows();
     render();
   });
 

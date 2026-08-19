@@ -28,6 +28,7 @@
     'game:skip': 'skip',
     'game:lobby': 'lobby',
     'meme:draft': 'draft',
+    'meme:swap': 'swap',
     'meme:submit': 'submit',
     'vote:cast': 'vote',
     'room:leave': 'leave'

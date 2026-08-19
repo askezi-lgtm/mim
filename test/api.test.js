@@ -145,7 +145,7 @@ test('a lost write race is retried instead of dropped', async () => {
   assert.ok(sabotaged, 'the race actually happened');
   const stored = JSON.parse(h.storage.rooms.get(code).json);
   const mine = stored.submissions.find((s) => s.authorId === players[1].id);
-  assert.equal(mine.top, 'RETRIED', 'the caption survived the lost race');
+  assert.equal(mine.captions[0].text, 'RETRIED', 'the caption survived the lost race');
 });
 
 test('unknown rooms and lost seats answer 404', async () => {
@@ -177,4 +177,20 @@ test('bots play the serverless game too', async () => {
   const view = await h.api.state(code, host);
   assert.equal(view.body.state.phase, 'voting', 'the deadline advanced the round on a poll');
   assert.ok(view.body.state.meme, 'the bot produced a meme to rate');
+});
+
+test('swapping a template works over HTTP too', async () => {
+  const h = harness();
+  const { code, players } = await newGame(h, ['Alice', 'Bob']);
+  await h.api.rpc({ op: 'settings', code, playerId: players[0].id, payload: { swapsPerRound: 1 } });
+  await h.api.rpc({ op: 'start', code, playerId: players[0].id });
+
+  const before = (await h.api.state(code, players[0].id)).body.state.writing;
+  const swapped = await h.api.rpc({ op: 'swap', code, playerId: players[0].id });
+  assert.equal(swapped.status, 200);
+  assert.notEqual(swapped.body.state.writing.template.id, before.template.id);
+  assert.equal(swapped.body.state.writing.swapsLeft, 0);
+
+  const spent = await h.api.rpc({ op: 'swap', code, playerId: players[0].id });
+  assert.deepEqual(spent.body.result, { error: 'NO_SWAPS_LEFT' });
 });

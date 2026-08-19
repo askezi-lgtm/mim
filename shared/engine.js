@@ -22,6 +22,8 @@ const MIN_PLAYERS = 2;
 const MAX_PLAYERS = 12;
 const MAX_NAME = 16;
 const MAX_TEXT = 90;
+const MAX_CAPTIONS = 5;
+const DEFAULT_CAPTION_Y = [0.08, 0.92, 0.5, 0.28, 0.72]; // where new lines land
 const POINTS_PER_STAR = 20;
 const ROUND_WINNER_BONUS = 50;
 const PRESENCE_TTL_MS = 20000; // polling clients are "here" if seen this recently
@@ -33,10 +35,12 @@ const DEFAULT_SETTINGS = {
   writeSeconds: 75,
   voteSeconds: 18,
   revealSeconds: 6,
-  scoreSeconds: 10
+  scoreSeconds: 10,
+  swapsPerRound: 20 // how many times a player may reroll their template
 };
 
 const SETTING_BOUNDS = {
+  swapsPerRound: [0, 20],
   rounds: [1, 10],
   writeSeconds: [20, 180],
   voteSeconds: [8, 60],
@@ -66,6 +70,29 @@ function sanitizeText(value, max) {
   if (typeof value !== 'string') return '';
   return value.replace(/\s+/g, ' ').trim().slice(0, max);
 }
+
+/**
+ * Captions are a list of text boxes placed anywhere on the image: `y` is the
+ * vertical centre as a fraction of the height, so 0 is the very top and 1 the
+ * very bottom. Two empty boxes (top and bottom) are the classic meme layout.
+ */
+function emptyCaptions() {
+  return [
+    { text: '', y: DEFAULT_CAPTION_Y[0] },
+    { text: '', y: DEFAULT_CAPTION_Y[1] }
+  ];
+}
+
+function normalizeCaptions(input) {
+  const list = Array.isArray(input) ? input : [];
+  const captions = list.slice(0, MAX_CAPTIONS).map((caption, i) => ({
+    text: sanitizeText(caption && caption.text, MAX_TEXT),
+    y: clamp(Number(caption && caption.y), 0.02, 0.98) || DEFAULT_CAPTION_Y[i % MAX_CAPTIONS]
+  }));
+  return captions.length ? captions : emptyCaptions();
+}
+
+const hasText = (submission) => submission.captions.some((caption) => caption.text);
 
 function makeId() {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
@@ -248,8 +275,8 @@ function newSubmission(authorId, template) {
     id: makeId(),
     authorId,
     template,
-    top: '',
-    bottom: '',
+    captions: emptyCaptions(),
+    swaps: 0,
     submitted: false,
     votes: {},
     points: 0,
@@ -293,7 +320,7 @@ function beginWriting(state, now) {
 
 function endWriting(state, now) {
   // Any caption with text counts, submitted or not: clients autosave drafts.
-  state.submissions = shuffle(state.submissions.filter((s) => s.top || s.bottom));
+  state.submissions = shuffle(state.submissions.filter(hasText));
   state.voteIndex = -1;
   if (state.submissions.length === 0) {
     showScores(state, now);
@@ -351,8 +378,7 @@ function finishRound(state, now) {
   state.roundResults = state.submissions.map((s) => ({
     id: s.id,
     template: s.template,
-    top: s.top,
-    bottom: s.bottom,
+    captions: s.captions,
     points: s.points,
     average: s.average,
     roundWinner: s.roundWinner,
@@ -405,26 +431,49 @@ function backToLobby(state, now) {
 
 /* ---------------------------------------------------------------- actions */
 
-function saveDraft(state, playerId, { top, bottom }, now) {
+/** Accepts the caption list, or the legacy `{ top, bottom }` pair. */
+function readCaptions(payload) {
+  if (payload && Array.isArray(payload.captions)) return normalizeCaptions(payload.captions);
+  return normalizeCaptions([
+    { text: payload && payload.top, y: DEFAULT_CAPTION_Y[0] },
+    { text: payload && payload.bottom, y: DEFAULT_CAPTION_Y[1] }
+  ]);
+}
+
+function saveDraft(state, playerId, payload, now) {
   if (state.phase !== 'writing') return { error: 'WRONG_PHASE' };
   const submission = state.submissions.find((s) => s.authorId === playerId);
   if (!submission) return { error: 'NO_SUBMISSION' };
-  submission.top = sanitizeText(top, MAX_TEXT);
-  submission.bottom = sanitizeText(bottom, MAX_TEXT);
+  submission.captions = readCaptions(payload);
   state.lastActivity = now;
   return {};
 }
 
-function submitMeme(state, playerId, { top, bottom }, now) {
+function submitMeme(state, playerId, payload, now) {
   if (state.phase !== 'writing') return { error: 'WRONG_PHASE' };
   const submission = state.submissions.find((s) => s.authorId === playerId);
   if (!submission) return { error: 'NO_SUBMISSION' };
-  submission.top = sanitizeText(top, MAX_TEXT);
-  submission.bottom = sanitizeText(bottom, MAX_TEXT);
-  submission.submitted = Boolean(submission.top || submission.bottom);
+  submission.captions = readCaptions(payload);
+  submission.submitted = hasText(submission);
   bump(state, now);
   maybeAdvanceOnInput(state, now);
   return {};
+}
+
+/** Reroll the template you were dealt, keeping whatever you already wrote. */
+function swapTemplate(state, playerId, now) {
+  if (state.phase !== 'writing') return { error: 'WRONG_PHASE' };
+  const submission = state.submissions.find((s) => s.authorId === playerId);
+  if (!submission) return { error: 'NO_SUBMISSION' };
+  if (submission.swaps >= state.settings.swapsPerRound) return { error: 'NO_SWAPS_LEFT' };
+  const used = usedSet(state);
+  used.add(submission.template.id);
+  const [template] = dealTemplates(1, used);
+  rememberTemplates(state, used);
+  submission.template = template;
+  submission.swaps += 1;
+  bump(state, now);
+  return { template, swapsLeft: state.settings.swapsPerRound - submission.swaps };
 }
 
 function castVote(state, playerId, rating, now) {
@@ -486,7 +535,10 @@ function applyBots(state, now) {
       if (!submission || submission.submitted) continue;
       if (now < botWriteDueAt(state, bot)) continue;
       const [top, bottom] = BOT_LINES[hash(`${bot.id}:line${state.round}`) % BOT_LINES.length];
-      submitMeme(state, bot.id, { top, bottom }, now);
+      submitMeme(state, bot.id, { captions: [
+        { text: top, y: DEFAULT_CAPTION_Y[0] },
+        { text: bottom, y: DEFAULT_CAPTION_Y[1] }
+      ] }, now);
       changed = true;
       if (state.phase !== 'writing') break; // that submission ended the phase
     }
@@ -594,6 +646,7 @@ function snapshotFor(state, playerId, now) {
     minPlayers: MIN_PLAYERS,
     maxPlayers: MAX_PLAYERS,
     maxTextLength: MAX_TEXT,
+    maxCaptions: MAX_CAPTIONS,
     deadline: state.deadline,
     serverNow: now
   };
@@ -602,9 +655,10 @@ function snapshotFor(state, playerId, now) {
     const mine = state.submissions.find((s) => s.authorId === playerId) || null;
     snapshot.writing = {
       template: mine ? mine.template : null,
-      top: mine ? mine.top : '',
-      bottom: mine ? mine.bottom : '',
+      captions: mine ? mine.captions : emptyCaptions(),
       submitted: mine ? mine.submitted : false,
+      swapsLeft: mine ? Math.max(0, state.settings.swapsPerRound - mine.swaps) : 0,
+      maxCaptions: MAX_CAPTIONS,
       done: state.submissions.filter((s) => s.submitted).length,
       total: state.submissions.length
     };
@@ -618,8 +672,7 @@ function snapshotFor(state, playerId, now) {
         index: state.voteIndex + 1,
         total: state.submissions.length,
         template: submission.template,
-        top: submission.top,
-        bottom: submission.bottom,
+        captions: submission.captions,
         isMine: submission.authorId === playerId,
         yourRating: submission.votes[playerId] || null,
         voted: voters.filter((p) => submission.votes[p.id] !== undefined).length,
@@ -647,6 +700,7 @@ module.exports = {
   MAX_PLAYERS,
   MAX_NAME,
   MAX_TEXT,
+  MAX_CAPTIONS,
   DEFAULT_SETTINGS,
   PRESENCE_TTL_MS,
   LOBBY_GRACE_MS,
@@ -663,6 +717,7 @@ module.exports = {
   startGame,
   saveDraft,
   submitMeme,
+  swapTemplate,
   castVote,
   skipPhase,
   backToLobby,

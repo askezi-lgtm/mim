@@ -123,6 +123,7 @@ function createApi(storage, options = {}) {
       hostOnly(state, playerId, () => engine.backToLobby(state, clock) || {}),
 
     draft: (state, playerId, payload, clock) => engine.saveDraft(state, playerId, payload, clock),
+    swap: (state, playerId, _payload, clock) => engine.swapTemplate(state, playerId, clock),
     submit: (state, playerId, payload, clock) => engine.submitMeme(state, playerId, payload, clock),
     vote: (state, playerId, payload, clock) => engine.castVote(state, playerId, payload.rating, clock),
     leave: (state, playerId, _payload, clock) => engine.removePlayer(state, playerId, clock) || {}

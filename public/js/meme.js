@@ -70,17 +70,22 @@
     return lines;
   }
 
-  function drawCaption(ctx, rawText, width, height, position) {
+  /**
+   * Draw one caption box centred on `centerY` (0 = top of the image, 1 = the
+   * bottom) and report the band it occupies so the UI can let players drag it.
+   */
+  function drawCaption(ctx, rawText, width, height, centerY) {
     const text = (rawText || '').trim();
-    if (!text) return;
+    if (!text) return null;
     const value = HEBREW.test(text) ? text : text.toUpperCase();
     ctx.direction = HEBREW.test(text) ? 'rtl' : 'ltr';
     ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
     ctx.lineJoin = 'round';
     ctx.miterLimit = 2;
 
     const maxWidth = width * 0.92;
-    const maxHeight = height * 0.36;
+    const maxHeight = height * 0.45;
     let size = Math.round(width * 0.11);
     let lines = [];
     while (size > 14) {
@@ -99,16 +104,21 @@
     ctx.fillStyle = '#fff';
 
     const lineHeight = size * 1.1;
-    const margin = height * 0.03;
+    const blockHeight = (lines.length - 1) * lineHeight + size;
+    const margin = height * 0.02;
+    // Keep the whole block on the image however far the player drags it.
+    const top = Math.max(
+      margin,
+      Math.min(height - margin - blockHeight, centerY * height - blockHeight / 2)
+    );
+
     lines.forEach((line, i) => {
-      const y =
-        position === 'top'
-          ? margin + size * 0.9 + i * lineHeight
-          : height - margin - (lines.length - 1 - i) * lineHeight;
-      ctx.strokeText(line, width / 2, y);
-      ctx.fillText(line, width / 2, y);
+      const baseline = top + size * 0.85 + i * lineHeight;
+      ctx.strokeText(line, width / 2, baseline);
+      ctx.fillText(line, width / 2, baseline);
     });
     ctx.direction = 'inherit';
+    return { top, bottom: top + blockHeight, height: blockHeight };
   }
 
   /**
@@ -141,9 +151,30 @@
       drawPlaceholder(ctx, width, height, meme.template);
     }
 
-    drawCaption(ctx, meme.top, width, height, 'top');
-    drawCaption(ctx, meme.bottom, width, height, 'bottom');
+    const boxes = [];
+    (meme.captions || []).forEach((caption, index) => {
+      const box = drawCaption(ctx, caption.text, width, height, caption.y);
+      if (box) boxes.push({ index, ...box });
+    });
+    canvas.__captionBoxes = { width, height, boxes };
+    return canvas.__captionBoxes;
   }
 
-  window.MemeRender = { draw, preload, loadImage };
+  /**
+   * Which caption a pointer at `ratioY` (0..1 of the canvas height) is grabbing:
+   * the one whose drawn band contains it, otherwise the nearest one.
+   */
+  function captionAt(canvas, ratioY) {
+    const layout = canvas.__captionBoxes;
+    if (!layout || !layout.boxes.length) return null;
+    const y = ratioY * layout.height;
+    const hit = layout.boxes.find((box) => y >= box.top - 8 && y <= box.bottom + 8);
+    if (hit) return hit.index;
+    return layout.boxes.reduce((best, box) => {
+      const distance = Math.abs((box.top + box.bottom) / 2 - y);
+      return best === null || distance < best.distance ? { index: box.index, distance } : best;
+    }, null).index;
+  }
+
+  window.MemeRender = { draw, preload, loadImage, captionAt };
 })();

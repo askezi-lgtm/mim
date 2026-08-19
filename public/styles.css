@@ -322,7 +322,29 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 }
 .meme-canvas.small { max-width: 100%; border-radius: 12px 12px 0 0; }
 
-.caption-inputs { display: grid; gap: .5rem; margin-bottom: .8rem; }
+.caption-inputs { display: grid; gap: .5rem; margin-bottom: .6rem; }
+.caption-row { display: flex; gap: .4rem; align-items: center; }
+.caption-row .input { flex: 1; }
+.caption-row.active .input { border-color: var(--brand); }
+.drop-line {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  width: 2.3rem;
+  height: 2.3rem;
+  flex: 0 0 auto;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+.drop-line:hover { color: var(--bad); border-color: var(--bad); }
+
+.write-tools { display: flex; gap: .5rem; margin-bottom: .8rem; }
+.write-tools button { flex: 1; }
+
+.meme-canvas.draggable { touch-action: none; cursor: grab; }
+.meme-canvas.draggable:active { cursor: grabbing; }
+
+.hint { font-size: .8rem; color: var(--muted); margin: -.4rem 0 .6rem; }
 
 /* ------------------------------------------------------------------ rating */
 

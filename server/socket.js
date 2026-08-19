@@ -145,6 +145,12 @@ function registerHandlers(io, manager) {
       ack(cb, room.submitMeme(socket.data.playerId, payload));
     });
 
+    socket.on('meme:swap', (payload = {}, cb) => {
+      const room = currentRoom(payload);
+      if (!room) return ack(cb, { error: 'ROOM_NOT_FOUND' });
+      ack(cb, room.swapTemplate(socket.data.playerId));
+    });
+
     socket.on('meme:draft', (payload = {}) => {
       const room = currentRoom(payload);
       if (!room) return;
